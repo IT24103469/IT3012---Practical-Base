@@ -1,6 +1,8 @@
-import random
+﻿import random
 import math
 import heapq
+
+from logic_engine import KnowledgeBase
 
 
 class GreedyGridAgent:
@@ -54,6 +56,13 @@ class SearchAgent:
         self.active_algo = 'AStar'
         self.plan = []
 
+        # ---- Lab 07: Knowledge Base + safety rules ----
+        self.kb = KnowledgeBase()
+        # Rule 1: TargetVisible ^ HasDust => SafeToEngage
+        self.kb.tell_rule(['TargetVisible', 'HasDust'], 'SafeToEngage')
+        # Rule 2: SafeToEngage ^ BloodseekerMissing => Retreat
+        self.kb.tell_rule(['SafeToEngage', 'BloodseekerMissing'], 'Retreat')
+
     def manhattan_distance(self, pos, goal):
         distance = abs(pos[0] - goal[0]) + abs(pos[1] - goal[1])
         return int(distance)
@@ -71,8 +80,13 @@ class SearchAgent:
         goal_pos,
         walls,
         grid_size,
-        heuristic_type='manhattan'
+        heuristic_type='manhattan',
+        tile_facts=None
     ):
+
+        # Treat None as an empty dictionary
+        if tile_facts is None:
+            tile_facts = {}
 
         frontier = []
         reached_states = set()
@@ -131,12 +145,22 @@ class SearchAgent:
                 ):
                     continue
 
-                # Check wall
+                # REACHABILITY: physical wall check
                 if new_pos in walls:
                     continue
 
                 # Check already reached
                 if new_pos in reached_states:
+                    continue
+
+                # FEASIBILITY: ask the Knowledge Base (logical check)
+                self.kb.clear_facts()
+                for fact in tile_facts.get(new_pos, []):
+                    self.kb.tell_fact(fact)
+                self.kb.forward_chain()
+
+                if 'Retreat' in self.kb.facts:
+                    # Physically reachable but logically infeasible: skip
                     continue
 
                 # Calculate costs
@@ -179,12 +203,19 @@ class SearchAgent:
                 )
             )
 
+            # Sample facts per tile (the game does not produce these)
+            tile_facts = {
+                (1, 0): ['TargetVisible', 'HasDust', 'BloodseekerMissing'],  # deduces Retreat: blocked
+                (0, 1): ['TargetVisible', 'HasDust'],                        # SafeToEngage only: allowed
+            }
+
             # Run A*
             self.plan = self.astar_search(
                 current_pos,
                 goal_pos,
                 percept['walls'],
-                percept['grid_size']
+                percept['grid_size'],
+                tile_facts=tile_facts
             )
 
             # Return next action
